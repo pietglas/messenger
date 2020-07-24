@@ -19,7 +19,6 @@ Server::Server(uint16_t portnr) {
 	if (bind(list_socket_, (sockaddr*)&hint_, sizeof(hint_)) == -1) {
 		cerr << "Can't bind to IP/port" << endl;
 	}
-
 }
 
 Server::~Server() {
@@ -28,65 +27,57 @@ Server::~Server() {
 }
 
 void Server::acceptClientCalls() {
+	// declare client parameters
+	sockaddr_in client;
+	socklen_t client_size = sizeof(client);
+	char host[NI_MAXHOST];	// for hostname
+	char svc[NI_MAXSERV];	// for servername
+	// set timeout value
+	struct timeval tv;
+	tv.tv_sec = 20;	// timeout in seconds
+	tv.tv_usec = 0;
 	do {
 		if (listen(list_socket_, SOMAXCONN) == -1) {
 			cerr << "Can't listen" << endl;
 			return;
 		}
-		sockaddr_in client;
-		socklen_t client_size = sizeof(client);
-		char host[NI_MAXHOST];	// for hostname
-		char svc[NI_MAXSERV];	// for servername
-
-		// set timeout 
-		struct timeval tv;
-		tv.tv_sec = 20;
-		tv.tv_usec = 0;
+		// set select() parameters
 		fd_set rfds;
 		FD_ZERO(&rfds);
 		FD_SET(list_socket_, &rfds);
 		int client_socket;
-		// accept incoming calls from clients
+		// accept incoming calls from clients. Go to the next loop 
+		// iteration after 20 seconds if there is no pending client.
+		// otherwise, connect with the client. 
 		if (select(list_socket_+1, &rfds, NULL, NULL, &tv) > 0) {
 			client_socket = accept(list_socket_,
 										(sockaddr*)&client,
 										&client_size);
 		}
-		else
-			continue;
-
+		else continue;
+		// exit if a connection failed
 		if (client_socket == -1) {
 			cerr << "Couldn't connect with client" << endl;
 			return;
 		}
-		// keep track of the nr of clients
-		++nr_clients_;
-		// free up the listening socket so it can take incoming calls again
-		// close(list_socket_);
 		// clean up
 		memset(host, 0, NI_MAXHOST);
 		memset(svc, 0, NI_MAXSERV);
 		// get name info of the client
-		int result = getnameinfo((sockaddr*)&client,
-									sizeof(client),
-									host,
-									NI_MAXHOST,
-									svc,
-									NI_MAXSERV,
-									0);
-		if (result) {
+		int result = getnameinfo((sockaddr*)&client, sizeof(client),
+							host, NI_MAXHOST, svc, NI_MAXSERV, 0);
+		if (result)
 			cout << host << " connected on " << svc << endl;
-		}
 		else {
 			inet_ntop(AF_INET, &client.sin_addr, host, NI_MAXHOST);
 			cout << host << " connected on " << ntohs(client.sin_port) << endl;
 		}
 		// add client to list
-		clients_.push_back(client_socket);
-		// wait for messages until client disconnects
+		clients_.emplace(client_socket);
+		// create thread that waits for messages until client disconnects
 		client_threads_.push_back(
 			thread(&Server::receiveMessagesClient, this, client_socket));
-	} while (nr_clients_ > 0);
+	} while (!clients_.empty());
 }
 
 void Server::receiveMessagesClient(int client_socket) {
@@ -105,10 +96,10 @@ void Server::receiveMessagesClient(int client_socket) {
 			cout << "The client disconnected" << std::endl;
 			break;
 		}
-		// echo the message back to the clients
+		// echo the message back to all clients that are currently connected
 		for (auto& client : clients_)
 			send(client, buff, bytes_rec + 1, 0);
 	}
-	// update number of clients
-	--nr_clients_;
+	// remove client from the list of connected clients
+	clients_.erase(client_socket);
 }
