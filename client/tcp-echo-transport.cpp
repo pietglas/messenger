@@ -46,7 +46,6 @@ TCPEchoTransport::TCPEchoTransport(uint16_t portnr) :
 }
 
 TCPEchoTransport::~TCPEchoTransport() {
-	cerr << "transport tcp destructor called" << endl;
 }
 
 void TCPEchoTransport::send(const string& msg) {
